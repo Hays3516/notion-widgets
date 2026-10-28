@@ -1,0 +1,150 @@
+﻿<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>카운터</title>
+<style>
+  :root { --c: #4aa3df; --bg: #e3f1fb; }
+  html, body { margin: 0; background: transparent; font-family: system-ui, -apple-system, "Segoe UI", "Malgun Gothic", sans-serif; }
+  .card {
+    position: relative; overflow: hidden; display: flex; align-items: center; gap: 14px;
+    margin: 6px; padding: 14px 16px; border-radius: 14px; border: 2px solid var(--c);
+    background: color-mix(in srgb, var(--bg) 88%, transparent); color: #1f2a33;
+  }
+  .fill { position: absolute; inset: 0 auto 0 0; width: 0; background: color-mix(in srgb, var(--c) 30%, transparent); transition: width .4s ease; }
+  .card > :not(.fill) { position: relative; }
+  .emoji { font-size: 30px; width: 52px; height: 52px; display: grid; place-items: center; border-radius: 12px; background: #fff8e6; flex: none; }
+  .main { flex: 1; min-width: 0; text-align: center; }
+  .count { font-size: 26px; font-weight: 800; letter-spacing: 1px; }
+  .name { font-size: 16px; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .sub { font-size: 12px; color: color-mix(in srgb, var(--c) 70%, #333); }
+  .btns { display: flex; gap: 6px; flex: none; }
+  button {
+    width: 34px; height: 34px; border-radius: 9px; border: 2px solid var(--c); cursor: pointer;
+    font-size: 20px; font-weight: 800; line-height: 1; background: #fff; color: var(--c);
+  }
+  button.plus { background: var(--c); color: #fff; }
+  button:disabled { opacity: .4; cursor: default; }
+  .pop { position: absolute; right: 30px; top: 4px; font-size: 22px; font-weight: 800; color: var(--c); pointer-events: none; animation: pop 0.6s ease-out forwards; }
+  @keyframes pop { from { opacity: 1; transform: translateY(8px) scale(.8); } to { opacity: 0; transform: translateY(-18px) scale(1.3); } }
+  .card.done .count { color: var(--c); }
+</style>
+</head>
+<body>
+<div class="card" id="card">
+  <div class="fill" id="fill"></div>
+  <div class="emoji" id="emoji"></div>
+  <div class="main">
+    <div class="count" id="count"></div>
+    <div class="name" id="name"></div>
+    <div class="sub" id="sub"></div>
+  </div>
+  <div class="btns">
+    <button id="minus" aria-label="빼기">−</button>
+    <button id="plus" class="plus" aria-label="더하기">+</button>
+  </div>
+</div>
+
+<script id="logic">
+const Counter = {
+  COLORS: { sky: ['#4aa3df', '#e3f1fb'], green: ['#3fae5a', '#e4f5e8'], orange: ['#e8913a', '#fcefe1'], purple: ['#8b6fd6', '#efe9fb'], pink: ['#df5f97', '#fce6ef'] },
+
+  ymd(t) {
+    return t.getFullYear() + '-' + String(t.getMonth() + 1).padStart(2, '0') + '-' + String(t.getDate()).padStart(2, '0');
+  },
+
+  // 일 단위는 그날 날짜, 주 단위는 그 주 월요일 날짜를 기간 표시로 쓴다
+  periodKey(period, now) {
+    if (period !== 'week') return Counter.ymd(now);
+    const mon = new Date(now.getFullYear(), now.getMonth(), now.getDate() - (now.getDay() + 6) % 7);
+    return Counter.ymd(mon);
+  },
+
+  restore(saved, period, now, goal = Infinity) {
+    if (!saved || saved.key !== Counter.periodKey(period, now)) return 0;
+    return Math.min(Math.max(0, Number(saved.count) || 0), goal);
+  },
+
+  step(count, delta, goal) {
+    return Math.min(Math.max(0, count + delta), goal);
+  },
+
+  percent(count, goal) {
+    return Math.round(count / goal * 100);
+  },
+
+  params(search) {
+    const q = new URLSearchParams(search);
+    const goal = parseInt(q.get('goal'), 10);
+    return {
+      id: q.get('id') || 'counter',
+      name: q.get('name') || '카운터',
+      goal: goal > 0 ? goal : 4,
+      period: q.get('period') === 'week' ? 'week' : 'day',
+      emoji: q.get('emoji') || '📖',
+      color: q.get('color') || 'sky',
+    };
+  },
+};
+</script>
+
+<script>
+const p = Counter.params(location.search);
+const storeKey = 'counter.' + p.id;
+const $ = (id) => document.getElementById(id);
+const [c, bg] = Counter.COLORS[p.color] || Counter.COLORS.sky;
+document.documentElement.style.setProperty('--c', c);
+document.documentElement.style.setProperty('--bg', bg);
+document.title = p.name;
+$('emoji').textContent = p.emoji;
+$('name').textContent = p.name;
+$('sub').textContent = p.period === 'week' ? '이번 주 (월요일에 초기화)' : '오늘 (자정에 초기화)';
+
+function load() {
+  try { return JSON.parse(localStorage.getItem(storeKey)); } catch { return null; }
+}
+function save(count) {
+  try { localStorage.setItem(storeKey, JSON.stringify({ count, key: Counter.periodKey(p.period, new Date()) })); } catch {}
+}
+
+let count = Counter.restore(load(), p.period, new Date(), p.goal);
+
+function render() {
+  $('count').textContent = count + '/' + p.goal;
+  $('fill').style.width = Counter.percent(count, p.goal) + '%';
+  $('card').classList.toggle('done', count >= p.goal);
+  $('minus').disabled = count <= 0;
+  $('plus').disabled = count >= p.goal;
+}
+
+function change(delta) {
+  const next = Counter.step(count, delta, p.goal);
+  if (next === count) return;
+  count = next;
+  save(count);
+  render();
+  if (delta > 0) {
+    const el = document.createElement('div');
+    el.className = 'pop';
+    el.textContent = '+1';
+    $('card').appendChild(el);
+    el.addEventListener('animationend', () => el.remove());
+  }
+}
+
+// 페이지를 켜 둔 채 자정·월요일을 넘겨도 초기화되도록 다시 읽는다
+function refresh() {
+  count = Counter.restore(load(), p.period, new Date(), p.goal);
+  render();
+}
+
+$('plus').addEventListener('click', () => change(1));
+$('minus').addEventListener('click', () => change(-1));
+window.addEventListener('storage', refresh);
+document.addEventListener('visibilitychange', () => { if (!document.hidden) refresh(); });
+setInterval(refresh, 60000);
+render();
+</script>
+</body>
+</html>
